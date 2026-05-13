@@ -1,0 +1,254 @@
+import React, { useState, useMemo } from 'react';
+
+// --- Utilitários de Formatação ---
+const formatters = {
+  cnpj: (v) => v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5"),
+  cep: (v) => v.replace(/^(\d{5})(\d{3})$/, "$1-$2"),
+  currency: (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v),
+  date: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '-',
+  boolean: (v) => v ? 'Sim' : 'Não'
+};
+
+// --- Componente Recursivo para Dados Dinâmicos ---
+const DynamicData = ({ data }) => {
+  if (Array.isArray(data)) {
+    return (
+      <div className="pl-4 border-l-2 border-gray-200 space-y-2">
+        {data.map((item, idx) => (
+          <div key={idx} className="pb-2">
+            <span className="text-xs font-bold text-blue-600">ITEM #{idx + 1}</span>
+            <DynamicData data={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (typeof data === 'object' && data !== null) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-2">
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} className="flex flex-col border-b border-gray-50 pb-1">
+            <span className="text-[10px] uppercase font-semibold text-gray-400">{key.replace(/_/g, ' ')}</span>
+            <div className="text-sm text-gray-700">
+              {typeof value === 'object' ? <DynamicData data={value} /> : String(value ?? '-')}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <span>{String(data)}</span>;
+};
+
+export default function CNPJConsultor() {
+  const [cnpjInput, setCnpjInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  // Máscara em tempo real
+  const handleCnpjChange = (e) => {
+    const raw = e.target.value.replace(/\D/g, '').substring(0, 14);
+    let masked = raw;
+    if (raw.length > 2) masked = `${raw.slice(0, 2)}.${raw.slice(2)}`;
+    if (raw.length > 5) masked = `${masked.slice(0, 6)}.${raw.slice(5)}`;
+    if (raw.length > 8) masked = `${masked.slice(0, 10)}/${raw.slice(8)}`;
+    if (raw.length > 12) masked = `${masked.slice(0, 15)}-${raw.slice(12)}`;
+    setCnpjInput(masked);
+  };
+
+  const consultarCnpj = async () => {
+    const cleanCnpj = cnpjInput.replace(/\D/g, '');
+    if (cleanCnpj.length !== 14) {
+      setError('CNPJ deve conter 14 dígitos.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    try {
+      const response = await fetch(`https://publica.cnpj.ws/cnpj/${cleanCnpj}`);
+      if (!response.ok) throw new Error('Empresa não encontrada ou erro na API.');
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Contador de campos preenchidos (recursivo simples)
+  const countFields = (obj) => {
+    let count = 0;
+    for (const key in obj) {
+      if (obj[key] !== null && obj[key] !== undefined && obj[key] !== '') {
+        if (typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          count += countFields(obj[key]);
+        } else {
+          count++;
+        }
+      }
+    }
+    return count;
+  };
+
+  const fieldCount = useMemo(() => (data ? countFields(data) : 0), [data]);
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans text-gray-900">
+      <div className="max-w-6xl mx-auto">
+        
+        {/* Header & Search */}
+        <header className="mb-8 text-center md:text-left">
+          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+            Consultor <span className="text-blue-600">CNPJ</span> Pro
+          </h1>
+          <p className="text-gray-500 mt-2">Consulta em tempo real à base pública nacional.</p>
+          
+          <div className="mt-6 flex flex-col md:flex-row gap-3 max-w-xl mx-auto md:mx-0">
+            <input
+              type="text"
+              value={cnpjInput}
+              onChange={handleCnpjChange}
+              placeholder="00.000.000/0000-00"
+              className="flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-lg transition-all"
+            />
+            <button
+              onClick={consultarCnpj}
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center min-w-[140px]"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : 'Consultar'}
+            </button>
+          </div>
+          {error && <p className="text-red-500 mt-2 text-sm font-medium">⚠️ {error}</p>}
+        </header>
+
+        {data && (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            
+            {/* Stats Bar */}
+            <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold uppercase tracking-wider">
+                  {data.situacao_cadastral}
+                </span>
+                <span className="text-sm text-gray-500">
+                  Atualizado em: {formatters.date(data.atualizado_em)}
+                </span>
+              </div>
+              <div className="text-sm font-medium text-gray-600">
+                🚀 {fieldCount} campos de dados mapeados
+              </div>
+            </div>
+
+            {/* Resumo Principal (Grid) */}
+            <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="bg-gray-900 p-4 text-white flex justify-between items-center">
+                <h2 className="font-bold uppercase text-sm tracking-widest">Resumo Executivo</h2>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+                    alert('JSON copiado!');
+                  }}
+                  className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded transition-colors"
+                >
+                  Copiar JSON
+                </button>
+              </div>
+              
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div>
+                  <label className="text-xs font-bold text-gray-400 uppercase">Razão Social</label>
+                  <p className="font-semibold text-gray-800">{data.razao_social}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-400 uppercase">Nome Fantasia</label>
+                  <p className="font-semibold text-gray-800">{data.estabelecimento.nome_fantasia || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-400 uppercase">Capital Social</label>
+                  <p className="font-semibold text-green-600 text-lg">{formatters.currency(data.capital_social)}</p>
+                </div>
+                <div className="lg:col-span-2">
+                  <label className="text-xs font-bold text-gray-400 uppercase">Atividade Principal (CNAE)</label>
+                  <p className="text-sm text-gray-700">{data.estabelecimento.atividade_principal.descricao}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-400 uppercase">Contato</label>
+                  <p className="text-sm text-gray-700">{data.estabelecimento.email || 'Sem e-mail'}</p>
+                  <p className="text-sm text-gray-700 font-medium">{data.estabelecimento.ddd1} {data.estabelecimento.telefone1}</p>
+                </div>
+                <div className="lg:col-span-3 border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                   <div>
+                      <label className="text-xs font-bold text-gray-400 uppercase">Endereço</label>
+                      <p className="text-sm text-gray-700">
+                        {data.estabelecimento.logradouro}, {data.estabelecimento.numero} {data.estabelecimento.complemento}
+                      </p>
+                      <p className="text-sm text-gray-700">{data.estabelecimento.bairro} - {formatters.cep(data.estabelecimento.cep)}</p>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-gray-400 uppercase">Localidade</label>
+                      <p className="text-sm text-gray-700">{data.estabelecimento.cidade.nome} / {data.estabelecimento.estado.sigla}</p>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-gray-400 uppercase">Inscrições Estaduais</label>
+                      {data.estabelecimento.inscricoes_estaduais.length > 0 ? (
+                        data.estabelecimento.inscricoes_estaduais.map(ie => (
+                          <p key={ie.inscricao_estadual} className="text-xs text-blue-600 font-mono">
+                            {ie.estado.sigla}: {ie.inscricao_estadual}
+                          </p>
+                        ))
+                      ) : <p className="text-sm text-gray-400 italic">Não informadas</p>}
+                   </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Seção Dinâmica */}
+            <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div 
+                className="p-4 flex justify-between items-center cursor-pointer select-none hover:bg-gray-50"
+                onClick={() => setShowRaw(!showRaw)}
+              >
+                <h2 className="font-bold uppercase text-sm tracking-widest text-gray-500">
+                  Explorador de Dados Completo
+                </h2>
+                <span className="text-blue-600 text-xs font-bold">{showRaw ? 'OCULTAR' : 'VER TODOS OS DADOS'}</span>
+              </div>
+              
+              {showRaw && (
+                <div className="p-6 border-t border-gray-50 bg-gray-50/30">
+                  <DynamicData data={data} />
+                  
+                  <div className="mt-8">
+                    <h3 className="text-xs font-black text-gray-400 uppercase mb-4 tracking-widest">JSON Bruto</h3>
+                    <pre className="bg-gray-900 text-blue-400 p-4 rounded-xl overflow-x-auto text-xs leading-relaxed border-2 border-gray-800">
+                      {JSON.stringify(data, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* Placeholder inicial */}
+        {!data && !loading && (
+          <div className="mt-20 text-center py-12 border-2 border-dashed border-gray-200 rounded-3xl">
+            <div className="text-4xl mb-4 text-gray-300">🏢</div>
+            <p className="text-gray-400">Insira um CNPJ para visualizar o dossiê completo da empresa.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
